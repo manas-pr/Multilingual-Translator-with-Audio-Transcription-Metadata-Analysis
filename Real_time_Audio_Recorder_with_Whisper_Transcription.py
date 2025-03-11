@@ -1,27 +1,15 @@
-import os
-import sys
-import subprocess
-
-# Install st-audiorec directly from GitHub
-try:
-    import st_audiorec
-except ImportError:
-    subprocess.run(["pip", "install", "git+https://github.com/stefanrmmr/streamlit_audio_recorder.git"], check=True)
-    import st_audiorec
-
-
 import streamlit as st
-from st_audiorec import st_audiorec
-import whisper
 from translate import Translator
-import os
-from datetime import datetime
-from io import BytesIO
+import whisper
+import edge_tts
+import asyncio
+import soundfile as sf
+import tempfile  # For temporary file creation
 
-# Load Whisper Model
+# Load Whisper Model for Transcription
 model = whisper.load_model("base")
 
-# Translation Function
+# Function to translate text
 def translate_text(text, target_lang):
     translator = Translator(to_lang=target_lang)
     try:
@@ -30,75 +18,61 @@ def translate_text(text, target_lang):
     except Exception as e:
         return f"Error: {e}"
 
-# Streamlit UI Enhancements
-st.set_page_config(page_title="🎧 Enhanced Audio Recorder")
-st.markdown('''<style>.css-1egvi7u {margin-top: -3rem;}</style>''', unsafe_allow_html=True)
-st.markdown('''<style>.stAudio {height: 45px;}</style>''', unsafe_allow_html=True)
+# Function for TTS with safe parameters
+async def text_to_speech(text, voice, speed="+0%"):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
+        communicate = edge_tts.Communicate(text, voice=voice, rate=speed)
+        await communicate.save(temp_audio.name)
+        return temp_audio.name
+
+# Function to Save Uploaded File
+def save_uploaded_file(uploaded_file):
+    file_path = f"uploaded_audio.{uploaded_file.type.split('/')[-1]}"
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.read())
+    return file_path
+
+# Function to Extract Audio Metadata
+def get_audio_info(file_path):
+    try:
+        audio_data, sample_rate = sf.read(file_path)
+        duration = len(audio_data) / sample_rate
+        file_size = round((len(audio_data) * 2) / 1024, 2)  # File size in KB
+        return duration, sample_rate, file_size
+    except Exception as e:
+        return 0, 0, 0
 
 # Main Function
 def audiorec_demo_app():
-    st.title('🎧 Audio Recorder with Real-Time Whisper Transcription & Translation')
+    st.title('🎧 English Translator with Audio Transcription & Translation')
     st.markdown('Developed with ❤️ by [Manas Pratim](https://github.com/manas-pr)')
 
-    # Audio Recorder and File Upload
-    st.subheader("🎤 Record or Upload Audio")
-    wav_audio_data = st_audiorec()
-    uploaded_audio = st.file_uploader("📂 Upload Audio File (WAV format)", type=["wav"])
+    # File Upload
+    st.subheader("📂 Upload Audio File (WAV format)")
+    uploaded_file = st.file_uploader("Upload Audio", type=["wav"])
 
-    # Handle Audio Data (Recorder or Uploaded)
-    if uploaded_audio is not None:
-        audio_data = uploaded_audio.read()
-        filename = uploaded_audio.name
-    elif wav_audio_data is not None:
-        audio_data = wav_audio_data
-        filename = f"recording_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+    # Handle Audio Data (Uploaded File Only)
+    if uploaded_file:
+        audio_path = save_uploaded_file(uploaded_file)
 
-    # Proceed if audio is available
-    if 'audio_data' in locals():
-        st.audio(audio_data, format='audio/wav')
+        # Display audio details
+        duration, sample_rate, file_size = get_audio_info(audio_path)
+        st.success(f"✅ Audio saved: {audio_path}")
+        st.audio(audio_path)
 
-        # Save audio data to a file
-        with open(filename, "wb") as f:
-            f.write(audio_data)
+        # Display metadata
+        st.markdown(f"""
+        **🕒 Duration:** {round(duration, 2)} seconds  
+        **🎚️ Sample Rate:** {sample_rate} Hz  
+        **📂 File Size:** {file_size} KB  
+        """)
 
-        # Transcription Button
-        if st.button("📝 Transcribe Audio"):
-            with st.spinner("🧠 Step 1: Loading Audio..."):
-                st.info("✅ Audio loaded successfully.")
-
-            # Real-Time Transcription Progress
-            with st.spinner("🧠 Step 2: Transcribing Audio..."):
-                transcription_data = model.transcribe(filename)
-                transcription_text = transcription_data['text']
-
-                # Word-by-Word Progress in Single Line
-                st.subheader("🔎 Real-Time Transcription Progress")
-                placeholder = st.empty()  # Dynamic display
-                full_text = ""
-                for word in transcription_text.split():
-                    full_text += word + " "
-                    placeholder.markdown(f"**{full_text.strip()}**")
-
-                # Display Final Transcription
-                st.subheader("📝 Final Transcription (English)")
-                st.success(transcription_text)
-
-                # Language Selection for Translation
-                st.subheader("🌐 Choose Translation Language")
-                translation_lang = st.radio(
-                    "Select Language:",
-                    options=["Assamese", "Hindi"],
-                    horizontal=True
-                )
-
-                # Translation Button
-                if st.button("🌐 Translate"):
-                    with st.spinner(f"🔄 Translating to {translation_lang}..."):
-                        target_lang_code = "as" if translation_lang == "Assamese" else "hi"
-                        translated_text = translate_text(transcription_text, target_lang_code)
-                        st.subheader(f"📝 Translation ({translation_lang})")
-                        st.success(translated_text)
-                        print(f"Translated Text ({translation_lang}): {translated_text}")
+        # Transcription Process
+        with st.spinner("🔄 Transcribing audio..."):
+            transcription_data = model.transcribe(audio_path)
+            transcription_text = transcription_data['text']
+            st.subheader("📝 Transcribed Text (English)")
+            st.success(transcription_text)
 
             # Transcription Accuracy Details
             st.subheader("📊 Transcription Accuracy Details")
@@ -107,20 +81,61 @@ def audiorec_demo_app():
 
             # Detailed Segment Information
             for i, segment in enumerate(transcription_data['segments']):
-                st.write(f"**Segment {i + 1}:**")
                 st.write(f"🗣️ **Text:** {segment['text']}")
                 st.write(f"✅ **Confidence:** {segment['avg_logprob']:.2f}")
-                st.write(f"💇 **No Speech Probability:** {segment['no_speech_prob']:.2%}")
+                st.write(f"🔇 **No Speech Probability:** {segment['no_speech_prob']:.2%}")
                 st.write(f"🕒 **Start Time:** {segment['start']:.2f}s - **End Time:** {segment['end']:.2f}s")
                 st.markdown("---")
 
-        # Download Button
-        st.download_button(
-            label="⬇️ Download Audio",
-            data=audio_data,
-            file_name=filename,
-            mime="audio/wav"
-        )
+            # Use transcribed text for translation
+            english_text = transcription_text
+
+    # Translation Language Selection
+    translation_lang = st.selectbox(
+        "🌐 Choose Translation Language:",
+        options=["Assamese", "Hindi"]
+    )
+
+    # Speed Control Slider
+    speed_options = st.select_slider(
+        "🎯 Select Speaking Speed:",
+        options=["-50%", "-25%", "+0%", "+25%", "+50%"],
+        value="+0%"
+    )
+
+    # Voice Selection Dropdown
+    voice_options = {
+        "Assamese": ["bn-IN-TanishaaNeural", "bn-IN-BashkarNeural"],
+        "Hindi": ["hi-IN-MadhurNeural", "hi-IN-SwaraNeural"]
+    }
+    selected_voice = st.selectbox("🎙️ Select Voice:", options=voice_options[translation_lang])
+
+    # Button Layout
+    col1, col2 = st.columns(2)
+    with col1:
+        translate_button = st.button("Translate")
+    with col2:
+        clear_button = st.button("Clear")
+
+    # Translation Logic
+    if translate_button:
+        if english_text.strip():
+            target_lang_code = "as" if translation_lang == "Assamese" else "hi"
+            translated_text = translate_text(english_text, target_lang_code)
+            st.success(f"**Translated Text ({translation_lang}):** {translated_text}")
+            
+            # TTS with improved voice selection and error handling
+            try:
+                audio_file = asyncio.run(text_to_speech(translated_text, selected_voice, speed_options))
+                st.audio(audio_file, format="audio/mp3", start_time=0)
+            except Exception as e:
+                st.error(f"⚠️ TTS Error: {e}")
+        else:
+            st.warning("⚠️ Please enter some text for translation or upload an audio file.")
+
+    # Clear Button Logic
+    if clear_button:
+        st.experimental_rerun()
 
 if __name__ == '__main__':
     audiorec_demo_app()
