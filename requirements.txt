@@ -1,0 +1,7 @@
+streamlit
+whisper
+edge-tts
+mutagen
+soundfile
+translate
+st-audiorec
