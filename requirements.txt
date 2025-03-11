@@ -1,6 +1,5 @@
 streamlit
 whisper
-git+https://github.com/openai/whisper.git
 edge-tts
 mutagen
 soundfile
