@@ -4,3 +4,9 @@ edge-tts
 mutagen
 soundfile
 translate
+pandas
+plotly
+streamlit
+yfinance
+pandas-datareader
+prophet
