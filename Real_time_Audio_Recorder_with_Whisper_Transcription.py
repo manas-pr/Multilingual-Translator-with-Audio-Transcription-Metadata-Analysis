@@ -1,3 +1,14 @@
+import os
+import sys
+import subprocess
+
+# Install st-audiorec directly from GitHub
+try:
+    import st_audiorec
+except ImportError:
+    subprocess.run(["pip", "install", "git+https://github.com/stefanrmmr/streamlit_audio_recorder.git"], check=True)
+    import st_audiorec
+
 
 import streamlit as st
 from st_audiorec import st_audiorec
